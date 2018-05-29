@@ -60,15 +60,22 @@ rename term var newVar = helperfunction term var newVar where
   helperfunction  term@(Application a b) name newName   = (Application (helperfunction a name newName) (helperfunction b name newName))
   helperfunction  _ _ _ = undefined
 
--- check free and bound vars
+-- TODO fix: check free and bound variables in exprs
+-- 
 alphaCongruent :: LambdaTerm -> LambdaTerm -> Bool
-alphaCongruent = undefined
+alphaCongruent (Application a b)  (Application c d) = a `alphaCongruent` c && b `alphaCongruent` d
+alphaCongruent (Abstraction a b)  (Abstraction c d) = a == c && b `alphaCongruent` d
+-- alphaCongruent (Abstraction (LambdaVariable a) (LambdaVariable b)) (Abstraction (LambdaVariable c) (LambdaVariable d)) = 
+alphaCongruent (LambdaVariable a) (LambdaVariable b) = True
+alphaCongruent _ _ = False
+
 
 -- performs single step of beta reduction on an application
 betaReduce :: LambdaTerm -> LambdaTerm
-betaReduce (Application (Abstraction a b) c) = betaReduce $ rename b a c
-betaReduce (Application a b) = Application (betaReduce a) (betaReduce b)
-betaReduce (Abstraction a b) = (Abstraction a (betaReduce b))
+betaReduce val@(Application (Abstraction a b) c) = betaReduce $ rename b a c
+betaReduce val@(Application a b) = Application (betaReduce a) (betaReduce b)
+betaReduce val@(Abstraction a (LambdaVariable b)) = val
+betaReduce val@(Abstraction a b) = (Abstraction a (betaReduce b))
 betaReduce a = a
 
 betaReduceIO :: LambdaTerm -> IO LambdaTerm
@@ -93,6 +100,14 @@ betaReduceIO a = do return a
 -- doesnt really detect infinite growth in expansions:  betaReduceIOSafe (Application example3 yCombinator)
 recDepth = 10
 maxLen = 200
+
+betaReduceSafe :: Int -> LambdaTerm -> LambdaTerm
+betaReduceSafe num val@(Application (Abstraction a b) c) = if num >= recDepth then val else betaReduceSafe (num+1) $ rename b a c
+betaReduceSafe num val@(Application a b) = if num >= recDepth then val else Application (betaReduceSafe (num+1) a) (betaReduceSafe (num+1) b)
+betaReduceSafe num val@(Abstraction a (LambdaVariable b)) = if num >= recDepth then val else val
+betaReduceSafe num val@(Abstraction a b) = if num >= recDepth then val else (Abstraction a (betaReduceSafe (num+1) b))
+betaReduceSafe num a = a
+
 betaReduceIOSafe :: Int ->LambdaTerm -> IO LambdaTerm
 betaReduceIOSafe num val@(Application (Abstraction a b) c) = if num >= recDepth then return val else do
   putStrLn $ take maxLen $ show val
@@ -109,8 +124,8 @@ betaReduceIOSafe num val@(Abstraction a b) = if num >= recDepth then return val 
 betaReduceIOSafe num a = do return a
 
 -- shorthand synonym
-simplify = betaReduceIOSafe 0
-
+simplifyIO = betaReduceIOSafe 0
+simplify a = if isNormalForm a then a else simplify $ betaReduceSafe 0 a
 
 -- find next unused var name in alphabet, maybe lazy zip of alphabet symbols
 -- 
@@ -120,7 +135,7 @@ genVariable :: [LambdaTerm] -> LambdaTerm
 genVariable env = undefined
 
 isNormalForm :: LambdaTerm -> Bool
-isNormalForm expr = expr == betaReduce expr
+isNormalForm expr = expr == betaReduceSafe 0 expr
 
 -- TODO parser
 asd :: Char -> Char -> Bool
@@ -134,30 +149,66 @@ appRegex = "("++varRegex++" "++varRegex++")"
 absRegex = "λ."++varRegex++"|"++"λ."++appRegex
 regex = varRegex ++ "|" ++ absRegex ++ "|" ++ varRegex
 
---  str =~ regex :: [String]
-
--- parse balanced paren
--- recurse brackets maybe
--- parse atomic brackets
--- ????????????????
-
 parseVar :: Parser LambdaTerm
-parseVar = undefined
-parseAbs :: Parser LambdaTerm
-parseAbs = undefined
-parseApp :: Parser LambdaTerm
-parseApp = undefined
+parseVar = do
+  x <- many1 $ oneOf alphabet
+  return (LambdaVariable x)
 
-parseList :: Parser LambdaTerm
-parseList = undefined
+parseAbsBrackets :: Parser LambdaTerm
+parseAbsBrackets = do
+  string "(λ"
+  many space
+  expr1 <- parseVar
+  char '.'
+  many space
+  expr2 <- parseTerm -- <|> parseAppNoBrackets
+  char ')'
+  return (Abstraction expr1 expr2)
+
+parseAbsNoBrackets :: Parser LambdaTerm
+parseAbsNoBrackets = do
+  string "λ"
+  many space
+  expr1 <- parseVar
+  char '.'
+  many space
+  expr2 <- parseTerm -- <|> parseAppNoBrackets
+  return (Abstraction expr1 expr2)
+  
+parseAbs :: Parser LambdaTerm
+parseAbs = do
+  try (parseAbsBrackets <|> parseAbsNoBrackets)
+
+parseAppBrackets :: Parser LambdaTerm
+parseAppBrackets = do
+  char '('
+  expr1 <- parseTerm
+  many space
+  expr2 <- parseTerm -- <|> parseAppNoBrackets
+  char ')'
+  return (Application expr1 expr2)
+  
+parseAppNoBrackets :: Parser LambdaTerm
+parseAppNoBrackets = do
+  expr1 <- parseVar <|> parseAbs
+  many space
+  expr2 <- parseVar <|> parseAbs
+  return (Application expr1 expr2)
+  
+parseApp :: Parser LambdaTerm
+parseApp = do
+  try parseAppBrackets -- <|> parseAppNoBrackets)
 
 parseTerm :: Parser LambdaTerm
-parseTerm = undefined
+parseTerm = parseApp <|> parseAbs <|> parseVar -- <|> parseList
 
+readTerm :: String -> LambdaTerm
+readTerm input = case parse parseTerm "haskell" input of
+  Left  err -> (LambdaVariable ("parse error" ++ show err))
+  Right val -> val
 
-parse :: String -> LambdaTerm
-parse str = if valid str then undefined else (LambdaVariable "PARSE ERROR")
-
+-- parse :: String -> LambdaTerm
+-- parse str = if valid str then undefined else (LambdaVariable "PARSE ERROR")
 -- TODO quickcheck to verify correctness
 
 -- TODO examples, numbers and arithmetic implementation
@@ -178,10 +229,25 @@ example4 = (Abstraction (LambdaVariable "f")
 -- non reducing
 example5 = (Application (Abstraction (LambdaVariable "x") (Application (LambdaVariable "x") (LambdaVariable "x"))) (Abstraction (LambdaVariable "x") (Application (LambdaVariable "x") (LambdaVariable "x"))))
 
+-- TODO maybe add stackexchange code golf examples
+t1 = readTerm "((λ x. x) (λ y. (λ z. z)))"
+t2 = readTerm "(λ x. ((λ y. y) x))"
+t3 = readTerm "((λ x. (λ y. x)) (λ a. a))"
+t4 = readTerm "(((λ x. (λ y. x)) (λ a. a)) (λ b. b))"
+t5 = readTerm "((λ x. (λ y. y)) (λ a. a))"
+t6 = readTerm "(((λ x. (λ y. y)) (λ a. a)) (λ b. b))"
+t7 = readTerm "((λx. (x x)) (λx. (x x)))"
+t8 = readTerm "(((λ x. (λ y. x)) (λ a. a)) ((λx. (x x)) (λx. (x x))))"
+t9 = readTerm "((λ a. (λ b. (a (a (a b))))) (λ c. (λ d. (c (c d)))))"
+
+-- TODO arithmetic operators
+
+
 
 -- TODO combinatory logic examples
 kComb = (Abstraction (LambdaVariable "x") (Abstraction (LambdaVariable "y") (LambdaVariable "x")))
 sComb = (Abstraction (LambdaVariable "x") (Abstraction (LambdaVariable "y") (Abstraction (LambdaVariable "z") (Application (Application (LambdaVariable "x") (LambdaVariable "z")) (Application (LambdaVariable "y") (LambdaVariable "z"))))))
+iComb = (Abstraction (LambdaVariable "x") (LambdaVariable "x"))
 -- simplify (Application (Application sComb kComb) kComb) -> id
 
 yCombinator :: LambdaTerm
@@ -190,15 +256,35 @@ yCombinator = (Abstraction (LambdaVariable "g") (Application (Abstraction (Lambd
                                                                                                         (LambdaVariable "x"))))
                                                          (Abstraction (LambdaVariable "x") (Application (LambdaVariable "g")
                                                                                            (Application (LambdaVariable "x")
-                                                                                                        (LambdaVariable "x"))))))
+                                                                                             (LambdaVariable "x"))))))
+              
+-- TODO pretty printer functionality
+showSubterms :: LambdaTerm -> String
+showSubterms expr = "Subterms\n"++ unlines (map (show) (subTerms expr)) ++ "\n"
+
+
+showVars     expr = "Variables" ++ unlines(map (show) (variables expr)) ++
+                    "\nFree Variables\n" ++ unlines (map (show) (freeVariables expr)) ++ "\nBindings\n" ++ unlines (map (show) (bindings expr))
+showSimplify expr = "Reduced form\n" ++ show (betaReduce expr)
 printVerbose :: LambdaTerm -> String -> String
 printVerbose expr title = title ++ "\nSubterms\n" ++ unlines (map (show) (subTerms expr)) ++ "\nVariables\n" ++ unlines(map (show) (variables expr)) ++
                           "\nFree Variables\n" ++ unlines (map (show) (freeVariables expr)) ++ "\nBindings\n" ++ unlines (map (show) (bindings expr))
 
+prettyPrint expr title = title ++ showSubterms expr ++ showVars expr ++ showSimplify expr
+
 --
+
+
+
+
+
 main :: IO ()
 main = do
-  putStrLn $ printVerbose yCombinator "The Y-combinator"
-  putStrLn $ printVerbose example1 "Example term 1"
-  putStrLn alphabet
+  -- putStrLn $ printVerbose yCombinator "The Y-combinator"
+  -- putStrLn $ printVerbose example1 "Example term 1"
+  -- putStrLn alphabet
+  x <- getLine
+  if x == "" then return () else do
+    putStrLn $ show $ simplify $ readTerm x
+    main
   
