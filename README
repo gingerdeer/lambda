@@ -1,1 +1,12 @@
 schoolwork for a course on untyped lambda calculus
+
+EXAMPLE:
+
+λ> t9
+(λa.λb.(a (a (a b))) λc.λd.(c (c d)))
+λ> simplifyIO t9
+(λa.λb.(a (a (a b))) λc.λd.(c (c d)))
+λb.(λc.λd.(c (c d)) (λc.λd.(c (c d)) (λc.λd.(c (c d)) b)))
+λb.λd.(λd.(λd.(b (b d)) (λd.(b (b d)) d)) (λd.(λd.(b (b d)) (λd.(b (b d)) d)) d))
+λb.λd.(b (b (b (b (b (b (b (b d))))))))
+λb.λd.(b (b (b (b (b (b (b (b d))))))))
