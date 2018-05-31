@@ -27,6 +27,9 @@ instance Eq LambdaTerm where
 --data (Eq a) => LambdaVar a = LVar a
 -- typeVar = String
 -- type = typeVar | Arrow typeVar typeVar
+-- define set of initial types bool nat etc
+-- type derivation rules for var app abs
+-- deriveType context expr = ....
 
 data SimpleType = TypeVar String | Arrow SimpleType SimpleType
 
@@ -35,6 +38,14 @@ instance Show SimpleType where
   show (Arrow a f@(Arrow _ _)) = show a ++ "-> (" ++ show f ++ ")" 
   show (Arrow (TypeVar a) (TypeVar b)) =  a ++ "->" ++ b
   show (TypeVar a) = a
+
+type Context = [(LambdaTerm,SimpleType)]
+
+createContext :: Context
+createContext = []
+
+addVarToContext :: Context -> LambdaTerm -> SimpleType -> Context
+addVarToContext = undefined
 
 exampleType1 :: SimpleType
 exampleType1 = (Arrow (Arrow (TypeVar "A") (TypeVar "B")) (TypeVar "C"))
